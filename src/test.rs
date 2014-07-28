@@ -1,9 +1,20 @@
 #[cfg(test)]
 mod test {
-    use say_hi;
+    use std::io::net::ip::SocketAddr;
+    use connect;
 
     #[test]
-    fn should_say_hi() {
-        assert_eq!(say_hi(), "hi");
+    fn should_connect() {
+        let socket_addr = from_str::<SocketAddr>("127.0.0.1:4567").expect("malformed address");
+        let connection = connect(socket_addr, "test", false, false);
+        assert!(true);
+    }
+
+    #[test]
+    fn should_disconnect() {
+        let socket_addr = from_str::<SocketAddr>("127.0.0.1:4567").expect("malformed address");
+        let connection = connect(socket_addr, "test", false, false);
+        connection.disconnect();
+        assert!(true);
     }
 }

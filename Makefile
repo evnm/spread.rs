@@ -3,9 +3,9 @@ RUSTC_FLAGS ?=
 
 SRC = $(shell find src -name '*.rs')
 
-all: libspread
+all: spread
 
-libspread: $(SRC)
+spread: $(SRC)
 	mkdir -p target
 	$(RUSTC) --out-dir target src/lib.rs
 
