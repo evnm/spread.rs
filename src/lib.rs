@@ -9,9 +9,10 @@ extern crate encoding;
 
 use encoding::{Encoding, EncodeStrict};
 use encoding::all::ISO_8859_1;
+use std::io::{ConnectionFailed, ConnectionRefused, IoError, IoResult, OtherIoError};
 use std::io::net::ip::SocketAddr;
 use std::io::net::tcp::TcpStream;
-use std::io::{ConnectionFailed, ConnectionRefused, IoError};
+use std::iter::range_step_inclusive;
 use std::result::Result;
 
 mod test;
@@ -22,6 +23,14 @@ static MaxPrivateNameLength: uint = 10;
 static DefaultAuthName: &'static str  = "NULL";
 static MaxAuthNameLength: uint = 30;
 static MaxAuthMethodCount: uint = 3;
+
+// Control message types.
+enum ControlServiceType {
+    JoinMessage   = 0x00010000,
+    LeaveMessage  = 0x00020000,
+    KillMessage   = 0x00040000,
+    GroupsMessage = 0x00080000
+}
 
 static SpreadMajorVersion: u8 = 4;
 static SpreadMinorVersion: u8 = 4;
@@ -51,18 +60,10 @@ pub enum SpreadError {
 
 pub struct SpreadClient {
     stream: TcpStream,
-    name: String,
-    group: SpreadGroup,
+    private_name: String,
+    group: String,
     is_priority_connection: bool,
     receive_membership_messages: bool
-}
-
-pub struct SpreadGroup {
-    name: String
-}
-
-pub struct SpreadMessageHeader {
-    recipients: Vec<SpreadGroup>
 }
 
 // Construct a byte vector representation of a connect message for the given
@@ -72,12 +73,12 @@ fn encode_connect_message(
     is_priority_connection: bool,
     receive_membership_messages: bool
 ) -> Vec<u8> {
-    let mut buf: Vec<u8> = Vec::new();
+    let mut vec: Vec<u8> = Vec::new();
 
     // Set Spread version.
-    buf.push(SpreadMajorVersion);
-    buf.push(SpreadMinorVersion);
-    buf.push(SpreadPatchVersion);
+    vec.push(SpreadMajorVersion);
+    vec.push(SpreadMinorVersion);
+    vec.push(SpreadPatchVersion);
 
     // Apply masks for group membership and priority.
     let masked = match (is_priority_connection, receive_membership_messages) {
@@ -86,11 +87,11 @@ fn encode_connect_message(
         (false, true) => 16,
         (false, false) => 0
     };
-    buf.push(masked);
+    vec.push(masked);
 
-    buf.push(private_name.char_len() as u8);
-    buf.push_all(private_name.as_bytes());
-    buf
+    vec.push(private_name.char_len() as u8);
+    vec.push_all(private_name.as_bytes());
+    vec
 }
 
 /// Establishes a named connection to a Spread daemon running at a given
@@ -109,7 +110,7 @@ pub fn connect(
     private_name: &str,
     is_priority_connection: bool,
     receive_membership_messages: bool
-) -> Result<SpreadClient, IoError> {
+) -> IoResult<SpreadClient> {
     // Truncate (if necessary) and write `private_name`.
     let truncated_private_name = match private_name {
         too_long if too_long.char_len() > MaxPrivateNameLength =>
@@ -220,28 +221,86 @@ pub fn connect(
 
     Ok(SpreadClient {
         stream: stream,
-        name: String::from_str(truncated_private_name),
-        group: SpreadGroup { name: group_name },
+        private_name: String::from_str(truncated_private_name),
+        group: group_name,
         is_priority_connection: is_priority_connection,
         receive_membership_messages: receive_membership_messages
     })
 }
 
-/*
-impl SpreadClient {
-    /// Disconnects the connection to the Spread daemon.
-    pub fn disconnect(&self)
 
+impl SpreadClient {
+    // Convert a uint to a 4-element byte vector.
+    fn int_to_bytes(i: uint) -> Vec<u8> {
+        let mut vec: Vec<u8> = Vec::new();
+        for p in range_step_inclusive(0u, 24, 8) {
+            vec.push(((i >> p) & 0xFF) as u8);
+        }
+        vec.reverse();
+        vec
+    }
+
+    // Encode a service message for dispatch to a Spread daemon.
+    fn encode_message(
+        service_type: uint,
+        private_name: &str,
+        groups: &[&str],
+        data: &[u8]
+    ) -> Result<Vec<u8>, String> {
+        let mut vec: Vec<u8> = Vec::new();
+        vec.push_all_move(SpreadClient::int_to_bytes(service_type));
+
+        let private_name_buf = try!(ISO_8859_1.encode(DefaultAuthName, EncodeStrict).map_err(
+            |_| format!("Failed to encode private name: {}", private_name)
+        ));
+        vec.push_all_move(private_name_buf);
+
+        vec.push_all_move(SpreadClient::int_to_bytes(groups.len()));
+        vec.push_all_move(SpreadClient::int_to_bytes(0));
+        vec.push_all_move(SpreadClient::int_to_bytes(data.len()));
+
+        // Encode and push each group name, converting any encoding errors
+        // to error message strings.
+        for group in groups.iter() {
+            let group_buf = try!(ISO_8859_1.encode(DefaultAuthName, EncodeStrict).map_err(
+                |_| format!("Failed to encode group name: {}", group)
+            ));
+            vec.push_all_move(group_buf);
+        }
+
+        vec.push_all(data);
+
+        Ok(vec)
+    }
+
+    /// Disconnects the client from the Spread daemon.
+    // TODO: Prevent further usage of client?
+    pub fn disconnect(&mut self) -> IoResult<()> {
+        let name_slice = self.private_name.as_slice();
+        let kill_message = try!(SpreadClient::encode_message(
+            KillMessage as uint,
+            name_slice,
+            [name_slice],
+            []
+        ).map_err(|error_msg| IoError {
+            kind: OtherIoError,
+            desc: "Disconnection failed",
+            detail: Some(error_msg)
+        }));
+
+        self.stream.write(kill_message.as_slice())
+    }
+/*
     /// Join a named Spread group on the client's connection.
     /// All messages sent to the group will be received by the client until it
     /// has left the group.
-    pub fn join(&self, group_name: &str) -> SpreadGroup
+    pub fn join(&mut self, group_name: &str) -> IoResult<()>
 
     /// Send a message to all groups specified in the message header.
     pub fn multicast(
-        &self,
-        data: &[u8],
-        header: SpreadMessageHeader
+        &mut self,
+        groups: &[&str],
+        data: &[u8]
     ) -> Result<(), SpreadError>
+*/
 }
- */
