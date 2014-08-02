@@ -1,16 +1,28 @@
-#![crate_id = "spread#0.0.1"]
-#![crate_type = "lib"]
+#![crate_name = "spread"]
 #![comment = "A Rust client library for the Spread toolkit"]
+#![crate_type = "lib"]
 #![license = "MIT"]
 
 #[deny(non_camel_case_types)]
 
+extern crate encoding;
+
+use encoding::{Encoding, EncodeStrict};
+use encoding::all::ISO_8859_1;
 use std::io::net::ip::SocketAddr;
+use std::io::net::tcp::TcpStream;
+use std::io::{ConnectionFailed, ConnectionRefused, IoError};
+use std::result::Result;
 
 mod test;
 
 pub static DefaultSpreadPort: i16 = 4803;
+
 static MaxPrivateNameLength: uint = 10;
+static DefaultAuthName: &'static str  = "NULL";
+static MaxAuthNameLength: uint = 30;
+static MaxAuthMethodCount: uint = 3;
+
 static SpreadMajorVersion: u8 = 4;
 static SpreadMinorVersion: u8 = 4;
 static SpreadPatchVersion: u8 = 0;
@@ -38,8 +50,9 @@ pub enum SpreadError {
 }
 
 pub struct SpreadClient {
-    addr: SocketAddr,
+    stream: TcpStream,
     name: String,
+    group: SpreadGroup,
     is_priority_connection: bool,
     receive_membership_messages: bool
 }
@@ -96,7 +109,7 @@ pub fn connect(
     private_name: &str,
     is_priority_connection: bool,
     receive_membership_messages: bool
-) -> SpreadClient {
+) -> Result<SpreadClient, IoError> {
     // Truncate (if necessary) and write `private_name`.
     let truncated_private_name = match private_name {
         too_long if too_long.char_len() > MaxPrivateNameLength =>
@@ -111,37 +124,124 @@ pub fn connect(
         receive_membership_messages
     );
 
-    // TODO: Send the connect message.
+    let mut stream = try!(TcpStream::connect(addr.ip.to_string().as_slice(), addr.port));
+    try!(stream.write(connect_message.as_slice()));
 
-    SpreadClient {
-        addr: addr,
+    // Read the authentication methods.
+    let authname_len: u8 = try!(stream.read_byte());
+    if authname_len == -1 {
+        return Err(IoError {
+            kind: ConnectionFailed,
+            desc: "Connection closed during connect attempt to read auth name length",
+            detail: None
+        });
+    } else if authname_len >= 128 {
+        return Err(IoError {
+            kind: ConnectionRefused,
+            desc: "Connection attempt rejected",
+            detail: Some(format!("{}", (-256 as i32 | authname_len as i32)))
+        });
+    }
+
+    // Ignore the list.
+    // TODO: Support IP-based auth?
+    try!(stream.read_exact(authname_len as uint));
+
+    // Send auth method choice.
+    let mut authname_vec: Vec<u8> = match ISO_8859_1.encode(DefaultAuthName, EncodeStrict) {
+        Ok(vec) => vec,
+        Err(error) => return Err(IoError {
+            kind: ConnectionFailed,
+            desc: "Failed to encode authname",
+            detail: Some(format!("{}", error))
+        })
+    };
+
+    for _ in range(authname_len, (MaxAuthNameLength * MaxAuthMethodCount + 1) as u8) {
+        authname_vec.push(0);
+    }
+    try!(stream.write(authname_vec.as_slice()));
+
+    // Check for an accept message.
+    let accepted: u8 = try!(stream.read_byte());
+    if accepted != AcceptSession as u8 {
+        return Err(IoError {
+            kind: ConnectionFailed,
+            desc: "Connection attempt rejected",
+            detail: Some(format!("{}", (-256 as i32 | accepted as i32)))
+        });
+    }
+
+    // Read the version of Spread that the server is running.
+    let (major, minor, patch) =
+        (try!(stream.read_byte()) as i32, try!(stream.read_byte()) as i32, try!(stream.read_byte()) as i32);
+
+    if major == -1 || minor == -1 || patch == -1 {
+        return Err(IoError {
+            kind: ConnectionFailed,
+            desc: "Invalid version returned from server",
+            detail: Some(format!("{}.{}.{}", major, minor, patch))
+        });
+    }
+
+    let version_sum = (major*10000) + (minor*100) + patch;
+    if version_sum < 30100 {
+        return Err(IoError {
+            kind: ConnectionFailed,
+            desc: "Server is running old, unsupported version of Spread",
+            detail: Some(format!("{}.{}.{}", major, minor, patch))
+        });
+    } else if version_sum < 30800 && is_priority_connection {
+        return Err(IoError {
+            kind: ConnectionFailed,
+            desc: "Server is running old version of Spread that does not support priority connections",
+            detail: Some(format!("{}.{}.{}", major, minor, patch))
+        });
+    }
+
+    // Read the private group name.
+    let group_name_len: u8 = try!(stream.read_byte());
+    if group_name_len == -1 {
+        return Err(IoError {
+            kind: ConnectionFailed,
+            desc: "Connection closed during connect attempt to read group name length",
+            detail: None
+        });
+    }
+    let group_name_buf = try!(stream.read_exact(group_name_len as uint));
+    let group_name = match String::from_utf8(group_name_buf) {
+        Ok(group_name) => group_name,
+        Err(error) => return Err(IoError {
+            kind: ConnectionFailed,
+            desc: "Server sent invalid group name",
+            detail: Some(format!("{}", error))
+        })
+    };
+
+    Ok(SpreadClient {
+        stream: stream,
         name: String::from_str(truncated_private_name),
+        group: SpreadGroup { name: group_name },
         is_priority_connection: is_priority_connection,
         receive_membership_messages: receive_membership_messages
-    }
+    })
 }
 
+/*
 impl SpreadClient {
     /// Disconnects the connection to the Spread daemon.
-    pub fn disconnect(&self) {
-        println!("{}", "disconnected");
-    }
+    pub fn disconnect(&self)
 
     /// Join a named Spread group on the client's connection.
     /// All messages sent to the group will be received by the client until it
     /// has left the group.
-    pub fn join(&self, group_name: &str) -> SpreadGroup {
-        SpreadGroup {
-            name: String::from_str(group_name)
-        }
-    }
+    pub fn join(&self, group_name: &str) -> SpreadGroup
 
     /// Send a message to all groups specified in the message header.
     pub fn multicast(
         &self,
         data: &[u8],
         header: SpreadMessageHeader
-    ) -> Result<(), SpreadError> {
-        Ok(())
-    }
+    ) -> Result<(), SpreadError>
 }
+ */

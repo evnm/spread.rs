@@ -1,5 +1,6 @@
 RUSTC ?= rustc
-RUSTC_FLAGS ?=
+RUSTDOC ?= rustdoc
+RUSTC_FLAGS ?= -O
 
 SRC = $(shell find src -name '*.rs')
 
@@ -14,7 +15,10 @@ test: $(SRC)
 	$(RUSTC) --test --out-dir target src/lib.rs
 	./target/spread
 
-clean:
-	@rm -rf target
+.PHONY: doc
+doc: $(SRC)
+	$(RUSTDOC) $<
 
 .PHONY: clean
+clean:
+	@rm -rf target

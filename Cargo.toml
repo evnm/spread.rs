@@ -1,0 +1,9 @@
+[package]
+
+name = "spread"
+version = "0.0.1"
+authors = [ "evan.meagher@gmail.com" ]
+
+[dependencies.encoding]
+
+git = "https://github.com/lifthrasiir/rust-encoding.git"
