@@ -61,7 +61,7 @@ pub enum SpreadError {
 pub struct SpreadClient {
     stream: TcpStream,
     private_name: String,
-    group: String,
+    groups: Vec<String>,
     is_priority_connection: bool,
     receive_membership_messages: bool
 }
@@ -222,7 +222,7 @@ pub fn connect(
     Ok(SpreadClient {
         stream: stream,
         private_name: String::from_str(truncated_private_name),
-        group: group_name,
+        groups: vec!(group_name),
         is_priority_connection: is_priority_connection,
         receive_membership_messages: receive_membership_messages
     })
@@ -290,12 +290,47 @@ impl SpreadClient {
 
         self.stream.write(kill_message.as_slice())
     }
-/*
-    /// Join a named Spread group on the client's connection.
+
+    /// Join a named Spread group.
+    ///
     /// All messages sent to the group will be received by the client until it
     /// has left the group.
-    pub fn join(&mut self, group_name: &str) -> IoResult<()>
+    pub fn join(&mut self, group_name: &str) -> IoResult<()> {
+        let join_message = try!(SpreadClient::encode_message(
+            JoinMessage as uint,
+            self.private_name.as_slice(),
+            [group_name],
+            []
+        ).map_err(|error_msg| IoError {
+            kind: OtherIoError,
+            desc: "Disconnection failed",
+            detail: Some(error_msg)
+        }));
 
+        try!(self.stream.write(join_message.as_slice()));
+        self.groups.push(group_name.to_string());
+        Ok(())
+    }
+
+    /// Leave a named Spread group.
+    pub fn leave(&mut self, group_name: &str) -> IoResult<()> {
+        let leave_message = try!(SpreadClient::encode_message(
+            LeaveMessage as uint,
+            self.private_name.as_slice(),
+            [group_name],
+            []
+        ).map_err(|error_msg| IoError {
+            kind: OtherIoError,
+            desc: "Disconnection failed",
+            detail: Some(error_msg)
+        }));
+
+        try!(self.stream.write(leave_message.as_slice()));
+        self.groups.push(group_name.to_string());
+        Ok(())
+    }
+
+/*
     /// Send a message to all groups specified in the message header.
     pub fn multicast(
         &mut self,
