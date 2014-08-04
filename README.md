@@ -1,4 +1,4 @@
-1;2c# spread-rs
+# spread-rs
 
 A Rust client library for the Spread toolkit.
 
