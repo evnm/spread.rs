@@ -1,4 +1,4 @@
-# spread-rs
+1;2c# spread-rs
 
 A Rust client library for the Spread toolkit.
 
@@ -43,14 +43,19 @@ To generate documentation:
 
 Connect to a Spread daemon running locally on port 4803:
 
+    extern crate spread;
+
+    use std::io::net::ip::SocketAddr;
+
     let socket_addr =
-      from_str::<SocketAddr>("127.0.0.1:4803").expect("malformed address");
-    let client = try!(connect(socket_addr, "test_user", false));
+        from_str::<SocketAddr>("127.0.0.1:4803").expect("malformed address");
+    let client = spread::connect(socket_addr, "test_user", false)
+        .ok().expect("failed to create client");
 
 Join a group and multicast a message:
 
     client.join("foo_group".as_slice());
-    client.multicast(["foo_group"], "hello");
+    client.multicast(["foo_group"], "hello".as_bytes());
 
 Block on receipt of a message, print the contents, and then leave and
 disconnect:
@@ -60,5 +65,5 @@ disconnect:
     println!("groups: {}", msg.groups);
     println!("data: {}", msg.data);
 
-    client.leave("foo".as_slice());
+    client.leave("foo_group".as_slice());
     client.disconnect();
