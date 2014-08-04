@@ -64,16 +64,16 @@ pub enum SpreadError {
 /// A message to be sent or received by a Spread client to/from a group.
 pub struct SpreadMessage {
     service_type: u32,
-    groups: Vec<String>,
-    sender: String,
-    data: Vec<u8>,
+    pub groups: Vec<String>,
+    pub sender: String,
+    pub data: Vec<u8>,
 }
 
 /// Representation of a client connection to a Spread daemon.
 pub struct SpreadClient {
     stream: TcpStream,
-    private_name: String,
-    groups: Vec<String>,
+    pub private_name: String,
+    pub groups: Vec<String>,
     receive_membership_messages: bool
 }
 
