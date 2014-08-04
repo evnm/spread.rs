@@ -8,8 +8,8 @@ mod test {
 
     #[test]
     fn should_encode_connect_message_with_sufficiently_short_private_name() {
-        match encode_connect_message("test", true, true) {
-            Ok(result) => assert_eq!(result, vec!(4, 4, 0, 17, 4, 116, 101, 115, 116)),
+        match encode_connect_message("test", true) {
+            Ok(result) => assert_eq!(result, vec!(4, 4, 0, 16, 4, 116, 101, 115, 116)),
             Err(error) => fail!(error)
         }
     }
@@ -48,7 +48,7 @@ mod test {
     fn should_connect_and_disconnect() {
         let socket_addr =
             from_str::<SocketAddr>("127.0.0.1:4803").expect("malformed address");
-        let result = connect(socket_addr, "test_user", false, false);
+        let result = connect(socket_addr, "test_user", false);
         match result {
             Ok(mut client) => {
                 let msg = ISO_8859_1.encode("hello".as_slice(), EncodeStrict)
@@ -66,7 +66,7 @@ mod test {
     fn should_receive() {
         let socket_addr =
             from_str::<SocketAddr>("127.0.0.1:4803").expect("malformed address");
-        let result = connect(socket_addr, "test_user", false, false);
+        let result = connect(socket_addr, "test_user", true);
         match result {
             Ok(mut client) => {
                 assert!(client.join("foo".as_slice()).is_ok());

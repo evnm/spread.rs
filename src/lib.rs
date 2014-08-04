@@ -74,7 +74,6 @@ pub struct SpreadClient {
     stream: TcpStream,
     private_name: String,
     groups: Vec<String>,
-    is_priority_connection: bool,
     receive_membership_messages: bool
 }
 
@@ -82,7 +81,6 @@ pub struct SpreadClient {
 // connection arguments.
 fn encode_connect_message(
     private_name: &str,
-    is_priority_connection: bool,
     receive_membership_messages: bool
 ) -> Result<Vec<u8>, String> {
     let mut vec: Vec<u8> = Vec::new();
@@ -92,14 +90,13 @@ fn encode_connect_message(
     vec.push(SpreadMinorVersion);
     vec.push(SpreadPatchVersion);
 
-    // Apply masks for group membership and priority.
-    let masked = match (is_priority_connection, receive_membership_messages) {
-        (true, true) => 0x01 | 0x10,
-        (true, false) => 0x01,
-        (false, true) => 0x10,
-        (false, false) => 0
+    // Apply masks for group membership (and priority, which is unimplemented).
+    let mask = if receive_membership_messages {
+        0x10
+    } else {
+        0
     };
-    vec.push(masked);
+    vec.push(mask);
 
     let private_name_buf = try!(ISO_8859_1.encode(private_name, EncodeStrict).map_err(
         |_| format!("Failed to encode private name: {}", private_name)
@@ -117,14 +114,11 @@ fn encode_connect_message(
 ///
 /// - `addr`: The address at which the Spread daemon is running.
 /// - `private_name`: A name to use privately to refer to the connection.
-/// - `is_priority_connection`: If true, indicates that the connection is
-///   prioritized.
 /// - `receive_membership_messages`: If true, membership messages will be
 ///   received by the resultant client.
 pub fn connect(
     addr: SocketAddr,
     private_name: &str,
-    is_priority_connection: bool,
     receive_membership_messages: bool
 ) -> IoResult<SpreadClient> {
     // Truncate (if necessary) and write `private_name`.
@@ -137,7 +131,6 @@ pub fn connect(
     // Send the initial connect message.
     let connect_message = try!(encode_connect_message(
         truncated_private_name,
-        is_priority_connection,
         receive_membership_messages
     ).map_err(|error_msg| IoError {
         kind: ConnectionFailed,
@@ -212,12 +205,6 @@ pub fn connect(
             desc: "Server is running old, unsupported version of Spread",
             detail: Some(format!("{}.{}.{}", major, minor, patch))
         });
-    } else if version_sum < 30800 && is_priority_connection {
-        return Err(IoError {
-            kind: ConnectionFailed,
-            desc: "Server is running old version of Spread that does not support priority connections",
-            detail: Some(format!("{}.{}.{}", major, minor, patch))
-        });
     }
 
     // Read the private group name.
@@ -243,7 +230,6 @@ pub fn connect(
         stream: stream,
         private_name: private_group_name,
         groups: Vec::new(),
-        is_priority_connection: is_priority_connection,
         receive_membership_messages: receive_membership_messages
     })
 }
