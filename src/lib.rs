@@ -7,15 +7,16 @@
 
 extern crate encoding;
 
-use encoding::{Encoding, EncodeStrict};
+use encoding::{Encoding, EncodeStrict, DecodeStrict};
 use encoding::all::ISO_8859_1;
 use std::io::{ConnectionFailed, ConnectionRefused, IoError, IoResult, OtherIoError};
 use std::io::net::ip::SocketAddr;
 use std::io::net::tcp::TcpStream;
-use std::iter::range_step_inclusive;
 use std::result::Result;
+use util::{bytes_to_int, flip_endianness, int_to_bytes, same_endianness};
 
 mod test;
+mod util;
 
 pub static DefaultSpreadPort: i16 = 4803;
 
@@ -60,6 +61,15 @@ pub enum SpreadError {
     NetErrorOnSession = -18
 }
 
+/// A message to be sent or received by a Spread client to/from a group.
+pub struct SpreadMessage {
+    service_type: u32,
+    groups: Vec<String>,
+    sender: String,
+    data: Vec<u8>,
+}
+
+/// Representation of a client connection to a Spread daemon.
 pub struct SpreadClient {
     stream: TcpStream,
     private_name: String,
@@ -84,16 +94,16 @@ fn encode_connect_message(
 
     // Apply masks for group membership and priority.
     let masked = match (is_priority_connection, receive_membership_messages) {
-        (true, true) => 1 | 16,
-        (true, false) => 1,
-        (false, true) => 16,
+        (true, true) => 0x01 | 0x10,
+        (true, false) => 0x01,
+        (false, true) => 0x10,
         (false, false) => 0
     };
     vec.push(masked);
 
     let private_name_buf = try!(ISO_8859_1.encode(private_name, EncodeStrict).map_err(
         |_| format!("Failed to encode private name: {}", private_name)
-    ));
+            ));
 
     vec.push(private_name.char_len() as u8);
     vec.push_all_move(private_name_buf);
@@ -139,7 +149,7 @@ pub fn connect(
     try!(stream.write(connect_message.as_slice()));
 
     // Read the authentication methods.
-    let authname_len: u8 = try!(stream.read_byte());
+    let authname_len = try!(stream.read_byte()) as i32;
     if authname_len == -1 {
         return Err(IoError {
             kind: ConnectionFailed,
@@ -150,7 +160,7 @@ pub fn connect(
         return Err(IoError {
             kind: ConnectionRefused,
             desc: "Connection attempt rejected",
-            detail: Some(format!("{}", (-256 as i32 | authname_len as i32)))
+            detail: Some(format!("{}", (0xffffff00 | authname_len as u32) as i32))
         });
     }
 
@@ -168,7 +178,7 @@ pub fn connect(
         })
     };
 
-    for _ in range(authname_len, (MaxAuthNameLength * MaxAuthMethodCount + 1) as u8) {
+    for _ in range(authname_len as uint, (MaxAuthNameLength * MaxAuthMethodCount + 1)) {
         authname_vec.push(0);
     }
     try!(stream.write(authname_vec.as_slice()));
@@ -179,7 +189,7 @@ pub fn connect(
         return Err(IoError {
             kind: ConnectionFailed,
             desc: "Connection attempt rejected",
-            detail: Some(format!("{}", (-256 as i32 | accepted as i32)))
+            detail: Some(format!("{}", (0xffffff00 | accepted as u32) as i32))
         });
     }
 
@@ -211,7 +221,7 @@ pub fn connect(
     }
 
     // Read the private group name.
-    let group_name_len: u8 = try!(stream.read_byte());
+    let group_name_len = try!(stream.read_byte()) as i32;
     if group_name_len == -1 {
         return Err(IoError {
             kind: ConnectionFailed,
@@ -238,27 +248,16 @@ pub fn connect(
     })
 }
 
-
 impl SpreadClient {
-    // Convert a uint to a 4-element byte vector.
-    fn int_to_bytes(i: uint) -> Vec<u8> {
-        let mut vec: Vec<u8> = Vec::new();
-        for p in range_step_inclusive(0u, 24, 8) {
-            vec.push(((i >> p) & 0xFF) as u8);
-        }
-        vec.reverse();
-        vec
-    }
-
     // Encode a service message for dispatch to a Spread daemon.
     fn encode_message(
-        service_type: uint,
+        service_type: u32,
         private_name: &str,
         groups: &[&str],
         data: &[u8]
     ) -> Result<Vec<u8>, String> {
         let mut vec: Vec<u8> = Vec::new();
-        vec.push_all_move(SpreadClient::int_to_bytes(service_type));
+        vec.push_all_move(int_to_bytes(service_type));
 
         let private_name_buf = try!(ISO_8859_1.encode(private_name, EncodeStrict).map_err(
             |_| format!("Failed to encode private name: {}", private_name)
@@ -268,9 +267,9 @@ impl SpreadClient {
             vec.push(0);
         }
 
-        vec.push_all_move(SpreadClient::int_to_bytes(groups.len()));
-        vec.push_all_move(SpreadClient::int_to_bytes(0));
-        vec.push_all_move(SpreadClient::int_to_bytes(data.len()));
+        vec.push_all_move(int_to_bytes(groups.len() as u32));
+        vec.push_all_move(int_to_bytes(0));
+        vec.push_all_move(int_to_bytes(data.len() as u32));
 
         // Encode and push each group name, converting any encoding errors
         // to error message strings.
@@ -293,7 +292,7 @@ impl SpreadClient {
     pub fn disconnect(&mut self) -> IoResult<()> {
         let name_slice = self.private_name.as_slice();
         let kill_message = try!(SpreadClient::encode_message(
-            KillMessage as uint,
+            KillMessage as u32,
             name_slice,
             [name_slice],
             []
@@ -312,7 +311,7 @@ impl SpreadClient {
     /// has left the group.
     pub fn join(&mut self, group_name: &str) -> IoResult<()> {
         let join_message = try!(SpreadClient::encode_message(
-            JoinMessage as uint,
+            JoinMessage as u32,
             self.private_name.as_slice(),
             [group_name],
             []
@@ -330,7 +329,7 @@ impl SpreadClient {
     /// Leave a named Spread group.
     pub fn leave(&mut self, group_name: &str) -> IoResult<()> {
         let leave_message = try!(SpreadClient::encode_message(
-            LeaveMessage as uint,
+            LeaveMessage as u32,
             self.private_name.as_slice(),
             [group_name],
             []
@@ -353,7 +352,7 @@ impl SpreadClient {
         data: &[u8]
     ) -> IoResult<()> {
         let message = try!(SpreadClient::encode_message(
-            ReliableMessage as uint,
+            ReliableMessage as u32,
             self.private_name.as_slice(),
             groups,
             data
@@ -364,5 +363,70 @@ impl SpreadClient {
         }));
 
         self.stream.write(message.as_slice())
+    }
+
+    /// Receive the next available message. If there are no messages available,
+    /// the call will block until either a message is received or a timeout
+    /// expires.
+    pub fn receive(&mut self) -> IoResult<SpreadMessage> {
+        // Header format (sizes in bytes):
+        //   svc_type:   4
+        //   sender:    32
+        //   num_groups: 4
+        //   hint:       4
+        //   data_len:   4
+        let header_vec = try!(self.stream.read_exact(MaxGroupNameLength + 16));
+        let is_correct_endianness = same_endianness(bytes_to_int(header_vec.slice(0, 4)));
+
+        let svc_type = match (is_correct_endianness, bytes_to_int(header_vec.slice(0, 4))) {
+            (true, correct) => correct,
+            (false, incorrect) => flip_endianness(incorrect)
+        };
+
+        let sender = try!(
+            ISO_8859_1.decode(header_vec.slice(4, 36), DecodeStrict).map_err(|error| IoError {
+                kind: OtherIoError,
+                desc: "Decoding sender name failed",
+                detail: Some(String::from_str(error.as_slice()))
+            })
+        );
+
+        let num_groups = match (is_correct_endianness, bytes_to_int(header_vec.slice(36, 40))) {
+            (true, correct) => correct,
+            (false, incorrect) => flip_endianness(incorrect)
+        };
+        let data_len = match (is_correct_endianness, bytes_to_int(header_vec.slice(44, 48))) {
+            (true, correct) => correct,
+            (false, incorrect) => flip_endianness(incorrect)
+        };
+
+        // Groups format (sizes in bytes):
+        //   groups: num_groups
+        let groups_vec =
+            try!(self.stream.read_exact(MaxGroupNameLength * num_groups as uint));
+        let mut groups = Vec::new();
+
+        for n in range(0, num_groups) {
+            let i: uint = n as uint * MaxGroupNameLength;
+            let group = try!(
+                ISO_8859_1.decode(groups_vec.slice(i, i + MaxGroupNameLength), DecodeStrict)
+                    .map_err(|error| IoError {
+                        kind: OtherIoError,
+                        desc: "Decoding group name failed",
+                        detail: Some(String::from_str(error.as_slice()))
+                    }));
+            groups.push(group);
+        }
+
+        // Data format (sizes in bytes):
+        //   data: data_len
+        let data_vec = try!(self.stream.read_exact(data_len as uint));
+
+        Ok(SpreadMessage {
+            service_type: svc_type as u32,
+            groups: groups,
+            sender: sender,
+            data: data_vec
+        })
     }
 }
