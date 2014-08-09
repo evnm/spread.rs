@@ -3,9 +3,11 @@
 #![crate_type = "lib"]
 #![license = "MIT"]
 
+#![feature(phase)]
 #[deny(non_camel_case_types)]
 
 extern crate encoding;
+#[phase(plugin, link)] extern crate log;
 
 use encoding::{Encoding, EncodeStrict, DecodeStrict};
 use encoding::all::ISO_8859_1;
@@ -139,6 +141,7 @@ pub fn connect(
     }));
 
     let mut stream = try!(TcpStream::connect(addr.ip.to_string().as_slice(), addr.port));
+    debug!("Sending connect message to {}", addr);
     try!(stream.write(connect_message.as_slice()));
 
     // Read the authentication methods.
@@ -159,7 +162,13 @@ pub fn connect(
 
     // Ignore the list.
     // TODO: Support IP-based auth?
-    try!(stream.read_exact(authname_len as uint));
+    let authname_vec = try!(stream.read_exact(authname_len as uint));
+    let authname = try!(ISO_8859_1.decode(authname_vec.as_slice(), DecodeStrict).map_err(|error| IoError {
+        kind: OtherIoError,
+        desc: "Failed to decode received authname",
+        detail: Some(String::from_str(error.as_slice()))
+    }));
+    debug!("Received authentication method choice(s): {}", authname);
 
     // Send auth method choice.
     let mut authname_vec: Vec<u8> = match ISO_8859_1.encode(DefaultAuthName, EncodeStrict) {
@@ -174,6 +183,8 @@ pub fn connect(
     for _ in range(authname_len as uint, (MaxAuthNameLength * MaxAuthMethodCount + 1)) {
         authname_vec.push(0);
     }
+
+    debug!("Sending authentication method choice of {}", DefaultAuthName);
     try!(stream.write(authname_vec.as_slice()));
 
     // Check for an accept message.
@@ -186,9 +197,16 @@ pub fn connect(
         });
     }
 
+    debug!("Received session acceptance message from daemon");
+
     // Read the version of Spread that the server is running.
     let (major, minor, patch) =
         (try!(stream.read_byte()) as i32, try!(stream.read_byte()) as i32, try!(stream.read_byte()) as i32);
+
+    debug!(
+        "Received version message: daemon running Spread version {}.{}.{}",
+        major, minor, patch
+    );
 
     if major == -1 || minor == -1 || patch == -1 {
         return Err(IoError {
@@ -225,6 +243,9 @@ pub fn connect(
             detail: Some(format!("{}", error))
         })
     };
+
+    debug!("Received private name assignment from daemon: {}", private_group_name);
+    debug!("Client connected to daemon at {}", addr);
 
     Ok(SpreadClient {
         stream: stream,
@@ -288,6 +309,7 @@ impl SpreadClient {
             detail: Some(error_msg)
         }));
 
+        debug!("Disconnecting from daemon at {}", try!(self.stream.peer_name()));
         self.stream.write(kill_message.as_slice())
     }
 
@@ -307,6 +329,7 @@ impl SpreadClient {
             detail: Some(error_msg)
         }));
 
+        debug!("Client \"{}\" joining group \"{}\"", self.private_name, group_name);
         try!(self.stream.write(join_message.as_slice()));
         self.groups.push(group_name.to_string());
         Ok(())
@@ -325,11 +348,11 @@ impl SpreadClient {
             detail: Some(error_msg)
         }));
 
+        debug!("Client \"{}\" leaving group \"{}\"", self.private_name, group_name);
         try!(self.stream.write(leave_message.as_slice()));
         self.groups.push(group_name.to_string());
         Ok(())
     }
-
 
     /// Send a message to a set of named groups.
     pub fn multicast(
@@ -348,6 +371,8 @@ impl SpreadClient {
             detail: Some(error_msg)
         }));
 
+        debug!("Client \"{}\" multicasting {} bytes to group(s) {}",
+               self.private_name, data.len(), groups);
         self.stream.write(message.as_slice())
     }
 
@@ -372,7 +397,7 @@ impl SpreadClient {
         let sender = try!(
             ISO_8859_1.decode(header_vec.slice(4, 36), DecodeStrict).map_err(|error| IoError {
                 kind: OtherIoError,
-                desc: "Decoding sender name failed",
+                desc: "Failed to decode sender name",
                 detail: Some(String::from_str(error.as_slice()))
             })
         );
@@ -398,7 +423,7 @@ impl SpreadClient {
                 ISO_8859_1.decode(groups_vec.slice(i, i + MaxGroupNameLength), DecodeStrict)
                     .map_err(|error| IoError {
                         kind: OtherIoError,
-                        desc: "Decoding group name failed",
+                        desc: "Failed to decode group name",
                         detail: Some(String::from_str(error.as_slice()))
                     }));
             groups.push(group);
@@ -407,6 +432,9 @@ impl SpreadClient {
         // Data format (sizes in bytes):
         //   data: data_len
         let data_vec = try!(self.stream.read_exact(data_len as uint));
+
+        debug!("Received {} bytes from \"{}\" sent to group(s) {}",
+               data_len, sender, groups);
 
         Ok(SpreadMessage {
             service_type: svc_type as u32,
