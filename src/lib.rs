@@ -102,7 +102,7 @@ fn encode_connect_message(
 
     let private_name_buf = try!(ISO_8859_1.encode(private_name, EncodeStrict).map_err(
         |_| format!("Failed to encode private name: {}", private_name)
-            ));
+    ));
 
     vec.push(private_name.char_len() as u8);
     vec.push_all_move(private_name_buf);
@@ -325,7 +325,7 @@ impl SpreadClient {
             []
         ).map_err(|error_msg| IoError {
             kind: OtherIoError,
-            desc: "Disconnection failed",
+            desc: "Group join failed",
             detail: Some(error_msg)
         }));
 
@@ -344,7 +344,7 @@ impl SpreadClient {
             []
         ).map_err(|error_msg| IoError {
             kind: OtherIoError,
-            desc: "Disconnection failed",
+            desc: "Group leave failed",
             detail: Some(error_msg)
         }));
 
@@ -367,7 +367,7 @@ impl SpreadClient {
             data
         ).map_err(|error_msg| IoError {
             kind: OtherIoError,
-            desc: "Disconnection failed",
+            desc: "Multicast failed",
             detail: Some(error_msg)
         }));
 
