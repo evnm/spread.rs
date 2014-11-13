@@ -105,7 +105,7 @@ fn encode_connect_message(
     ));
 
     vec.push(private_name.char_len() as u8);
-    vec.push_all_move(private_name_buf);
+    vec.push_all(private_name_buf.as_slice());
     Ok(vec)
 }
 
@@ -140,7 +140,7 @@ pub fn connect(
         detail: Some(error_msg)
     }));
 
-    let mut stream = try!(TcpStream::connect(addr.ip.to_string().as_slice(), addr.port));
+    let mut stream = try!(TcpStream::connect(addr));
     debug!("Sending connect message to {}", addr);
     try!(stream.write(connect_message.as_slice()));
 
@@ -264,19 +264,19 @@ impl SpreadClient {
         data: &[u8]
     ) -> Result<Vec<u8>, String> {
         let mut vec: Vec<u8> = Vec::new();
-        vec.push_all_move(int_to_bytes(service_type));
+        vec.push_all(int_to_bytes(service_type).as_slice());
 
         let private_name_buf = try!(ISO_8859_1.encode(private_name, EncodeStrict).map_err(
             |_| format!("Failed to encode private name: {}", private_name)
         ));
-        vec.push_all_move(private_name_buf);
+        vec.push_all(private_name_buf.as_slice());
         for _ in range(private_name.len(), (MaxGroupNameLength)) {
             vec.push(0);
         }
 
-        vec.push_all_move(int_to_bytes(groups.len() as u32));
-        vec.push_all_move(int_to_bytes(0));
-        vec.push_all_move(int_to_bytes(data.len() as u32));
+        vec.push_all(int_to_bytes(groups.len() as u32).as_slice());
+        vec.push_all(int_to_bytes(0).as_slice());
+        vec.push_all(int_to_bytes(data.len() as u32).as_slice());
 
         // Encode and push each group name, converting any encoding errors
         // to error message strings.
@@ -284,7 +284,7 @@ impl SpreadClient {
             let group_buf = try!(ISO_8859_1.encode(*group, EncodeStrict).map_err(
                 |_| format!("Failed to encode group name: {}", group)
             ));
-            vec.push_all_move(group_buf);
+            vec.push_all(group_buf.as_slice());
             for _ in range(group.len(), (MaxGroupNameLength)) {
                 vec.push(0);
             }

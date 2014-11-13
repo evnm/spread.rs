@@ -10,7 +10,7 @@ mod test {
     fn should_encode_connect_message_with_sufficiently_short_private_name() {
         match encode_connect_message("test", true) {
             Ok(result) => assert_eq!(result, vec!(4, 4, 0, 16, 4, 116, 101, 115, 116)),
-            Err(error) => fail!(error)
+            Err(error) => panic!(error)
         }
     }
 
@@ -37,7 +37,7 @@ mod test {
                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 98, 101, 101, 102)
             ),
-            Err(error) => fail!(error)
+            Err(error) => panic!(error)
         }
     }
 
@@ -58,7 +58,7 @@ mod test {
                 assert!(client.leave("foo".as_slice()).is_ok());
                 assert!(client.disconnect().is_ok());
             },
-            Err(error) => fail!(error)
+            Err(error) => panic!(error)
         }
     }
 
@@ -78,7 +78,7 @@ mod test {
                 // fail the test so that stdout is printed.
                 assert!(false);
             },
-            Err(error) => fail!(error)
+            Err(error) => panic!(error)
         }
     }
 }
