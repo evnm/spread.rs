@@ -9,7 +9,7 @@
 extern crate encoding;
 #[phase(plugin, link)] extern crate log;
 
-use encoding::{Encoding, EncodeStrict, DecodeStrict};
+use encoding::{Encoding, EncoderTrap, DecoderTrap};
 use encoding::all::ISO_8859_1;
 use std::io::{ConnectionFailed, ConnectionRefused, IoError, IoResult, OtherIoError};
 use std::io::net::ip::SocketAddr;
@@ -100,7 +100,7 @@ fn encode_connect_message(
     };
     vec.push(mask);
 
-    let private_name_buf = try!(ISO_8859_1.encode(private_name, EncodeStrict).map_err(
+    let private_name_buf = try!(ISO_8859_1.encode(private_name, EncoderTrap::Strict).map_err(
         |_| format!("Failed to encode private name: {}", private_name)
     ));
 
@@ -163,7 +163,9 @@ pub fn connect(
     // Ignore the list.
     // TODO: Support IP-based auth?
     let authname_vec = try!(stream.read_exact(authname_len as uint));
-    let authname = try!(ISO_8859_1.decode(authname_vec.as_slice(), DecodeStrict).map_err(|error| IoError {
+    let authname = try!(ISO_8859_1.decode(
+        authname_vec.as_slice(), DecoderTrap::Strict
+    ).map_err(|error| IoError {
         kind: OtherIoError,
         desc: "Failed to decode received authname",
         detail: Some(String::from_str(error.as_slice()))
@@ -171,7 +173,7 @@ pub fn connect(
     debug!("Received authentication method choice(s): {}", authname);
 
     // Send auth method choice.
-    let mut authname_vec: Vec<u8> = match ISO_8859_1.encode(DefaultAuthName, EncodeStrict) {
+    let mut authname_vec: Vec<u8> = match ISO_8859_1.encode(DefaultAuthName, EncoderTrap::Strict) {
         Ok(vec) => vec,
         Err(error) => return Err(IoError {
             kind: ConnectionFailed,
@@ -189,7 +191,7 @@ pub fn connect(
 
     // Check for an accept message.
     let accepted: u8 = try!(stream.read_byte());
-    if accepted != AcceptSession as u8 {
+    if accepted != SpreadError::AcceptSession as u8 {
         return Err(IoError {
             kind: ConnectionFailed,
             desc: "Connection attempt rejected",
@@ -201,7 +203,9 @@ pub fn connect(
 
     // Read the version of Spread that the server is running.
     let (major, minor, patch) =
-        (try!(stream.read_byte()) as i32, try!(stream.read_byte()) as i32, try!(stream.read_byte()) as i32);
+        (try!(stream.read_byte()) as i32,
+         try!(stream.read_byte()) as i32,
+         try!(stream.read_byte()) as i32);
 
     debug!(
         "Received version message: daemon running Spread version {}.{}.{}",
@@ -266,7 +270,7 @@ impl SpreadClient {
         let mut vec: Vec<u8> = Vec::new();
         vec.push_all(int_to_bytes(service_type).as_slice());
 
-        let private_name_buf = try!(ISO_8859_1.encode(private_name, EncodeStrict).map_err(
+        let private_name_buf = try!(ISO_8859_1.encode(private_name, EncoderTrap::Strict).map_err(
             |_| format!("Failed to encode private name: {}", private_name)
         ));
         vec.push_all(private_name_buf.as_slice());
@@ -281,7 +285,7 @@ impl SpreadClient {
         // Encode and push each group name, converting any encoding errors
         // to error message strings.
         for group in groups.iter() {
-            let group_buf = try!(ISO_8859_1.encode(*group, EncodeStrict).map_err(
+            let group_buf = try!(ISO_8859_1.encode(*group, EncoderTrap::Strict).map_err(
                 |_| format!("Failed to encode group name: {}", group)
             ));
             vec.push_all(group_buf.as_slice());
@@ -299,10 +303,10 @@ impl SpreadClient {
     pub fn disconnect(&mut self) -> IoResult<()> {
         let name_slice = self.private_name.as_slice();
         let kill_message = try!(SpreadClient::encode_message(
-            KillMessage as u32,
+            ControlServiceType::KillMessage as u32,
             name_slice,
-            [name_slice],
-            []
+            [name_slice].as_slice(),
+            [].as_slice()
         ).map_err(|error_msg| IoError {
             kind: OtherIoError,
             desc: "Disconnection failed",
@@ -319,10 +323,10 @@ impl SpreadClient {
     /// has left the group.
     pub fn join(&mut self, group_name: &str) -> IoResult<()> {
         let join_message = try!(SpreadClient::encode_message(
-            JoinMessage as u32,
+            ControlServiceType::JoinMessage as u32,
             self.private_name.as_slice(),
-            [group_name],
-            []
+            [group_name].as_slice(),
+            [].as_slice()
         ).map_err(|error_msg| IoError {
             kind: OtherIoError,
             desc: "Group join failed",
@@ -338,10 +342,10 @@ impl SpreadClient {
     /// Leave a named Spread group.
     pub fn leave(&mut self, group_name: &str) -> IoResult<()> {
         let leave_message = try!(SpreadClient::encode_message(
-            LeaveMessage as u32,
+            ControlServiceType::LeaveMessage as u32,
             self.private_name.as_slice(),
-            [group_name],
-            []
+            [group_name].as_slice(),
+            [].as_slice()
         ).map_err(|error_msg| IoError {
             kind: OtherIoError,
             desc: "Group leave failed",
@@ -361,7 +365,7 @@ impl SpreadClient {
         data: &[u8]
     ) -> IoResult<()> {
         let message = try!(SpreadClient::encode_message(
-            ReliableMessage as u32,
+            ControlServiceType::ReliableMessage as u32,
             self.private_name.as_slice(),
             groups,
             data
@@ -395,7 +399,9 @@ impl SpreadClient {
         };
 
         let sender = try!(
-            ISO_8859_1.decode(header_vec.slice(4, 36), DecodeStrict).map_err(|error| IoError {
+            ISO_8859_1.decode(
+                header_vec.slice(4, 36), DecoderTrap::Strict
+            ).map_err(|error| IoError {
                 kind: OtherIoError,
                 desc: "Failed to decode sender name",
                 detail: Some(String::from_str(error.as_slice()))
@@ -420,7 +426,7 @@ impl SpreadClient {
         for n in range(0, num_groups) {
             let i: uint = n as uint * MaxGroupNameLength;
             let group = try!(
-                ISO_8859_1.decode(groups_vec.slice(i, i + MaxGroupNameLength), DecodeStrict)
+                ISO_8859_1.decode(groups_vec.slice(i, i + MaxGroupNameLength), DecoderTrap::Strict)
                     .map_err(|error| IoError {
                         kind: OtherIoError,
                         desc: "Failed to decode group name",
