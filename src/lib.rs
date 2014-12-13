@@ -1,7 +1,5 @@
 #![crate_name = "spread"]
-#![comment = "A Rust client library for the Spread toolkit"]
 #![crate_type = "lib"]
-#![license = "MIT"]
 
 #![feature(phase)]
 #[deny(non_camel_case_types)]
@@ -20,13 +18,13 @@ use util::{bytes_to_int, flip_endianness, int_to_bytes, same_endianness};
 mod test;
 mod util;
 
-pub static DefaultSpreadPort: i16 = 4803;
+pub static DEFAULT_SPREAD_PORT: i16 = 4803;
 
-static MaxPrivateNameLength: uint = 10;
-static DefaultAuthName: &'static str  = "NULL";
-static MaxAuthNameLength: uint = 30;
-static MaxAuthMethodCount: uint = 3;
-static MaxGroupNameLength: uint = 32;
+static MAX_PRIVATE_NAME_LENGTH: uint = 10;
+static DEFAULT_AUTH_NAME: &'static str  = "NULL";
+static MAX_AUTH_NAME_LENGTH: uint = 30;
+static MAX_AUTH_METHOD_COUNT: uint = 3;
+static MAX_GROUP_NAME_LENGTH: uint = 32;
 
 // Control message types.
 // NOTE: The only currently-implemented service type for messaging is "reliable".
@@ -37,9 +35,9 @@ enum ControlServiceType {
     ReliableMessage = 0x00000002
 }
 
-static SpreadMajorVersion: u8 = 4;
-static SpreadMinorVersion: u8 = 4;
-static SpreadPatchVersion: u8 = 0;
+static SPREAD_MAJOR_VERSION: u8 = 4;
+static SPREAD_MINOR_VERSION: u8 = 4;
+static SPREAD_PATCH_VERSION: u8 = 0;
 
 // Error codes, as per http://www.spread.org/docs/spread_docs_4/docs/error_codes.html
 pub enum SpreadError {
@@ -62,6 +60,8 @@ pub enum SpreadError {
     MessageTooLong = -17,
     NetErrorOnSession = -18
 }
+
+impl Copy for SpreadError {}
 
 /// A message to be sent or received by a Spread client to/from a group.
 pub struct SpreadMessage {
@@ -88,9 +88,9 @@ fn encode_connect_message(
     let mut vec: Vec<u8> = Vec::new();
 
     // Set Spread version.
-    vec.push(SpreadMajorVersion);
-    vec.push(SpreadMinorVersion);
-    vec.push(SpreadPatchVersion);
+    vec.push(SPREAD_MAJOR_VERSION);
+    vec.push(SPREAD_MINOR_VERSION);
+    vec.push(SPREAD_PATCH_VERSION);
 
     // Apply masks for group membership (and priority, which is unimplemented).
     let mask = if receive_membership_messages {
@@ -125,8 +125,8 @@ pub fn connect(
 ) -> IoResult<SpreadClient> {
     // Truncate (if necessary) and write `private_name`.
     let truncated_private_name = match private_name {
-        too_long if too_long.char_len() > MaxPrivateNameLength =>
-            too_long.slice_to(MaxPrivateNameLength),
+        too_long if too_long.char_len() > MAX_PRIVATE_NAME_LENGTH =>
+            too_long.slice_to(MAX_PRIVATE_NAME_LENGTH),
         just_fine => just_fine
     };
 
@@ -173,7 +173,7 @@ pub fn connect(
     debug!("Received authentication method choice(s): {}", authname);
 
     // Send auth method choice.
-    let mut authname_vec: Vec<u8> = match ISO_8859_1.encode(DefaultAuthName, EncoderTrap::Strict) {
+    let mut authname_vec: Vec<u8> = match ISO_8859_1.encode(DEFAULT_AUTH_NAME, EncoderTrap::Strict) {
         Ok(vec) => vec,
         Err(error) => return Err(IoError {
             kind: ConnectionFailed,
@@ -182,11 +182,11 @@ pub fn connect(
         })
     };
 
-    for _ in range(authname_len as uint, (MaxAuthNameLength * MaxAuthMethodCount + 1)) {
+    for _ in range(authname_len as uint, (MAX_AUTH_NAME_LENGTH * MAX_AUTH_METHOD_COUNT + 1)) {
         authname_vec.push(0);
     }
 
-    debug!("Sending authentication method choice of {}", DefaultAuthName);
+    debug!("Sending authentication method choice of {}", DEFAULT_AUTH_NAME);
     try!(stream.write(authname_vec.as_slice()));
 
     // Check for an accept message.
@@ -274,7 +274,7 @@ impl SpreadClient {
             |_| format!("Failed to encode private name: {}", private_name)
         ));
         vec.push_all(private_name_buf.as_slice());
-        for _ in range(private_name.len(), (MaxGroupNameLength)) {
+        for _ in range(private_name.len(), (MAX_GROUP_NAME_LENGTH)) {
             vec.push(0);
         }
 
@@ -289,7 +289,7 @@ impl SpreadClient {
                 |_| format!("Failed to encode group name: {}", group)
             ));
             vec.push_all(group_buf.as_slice());
-            for _ in range(group.len(), (MaxGroupNameLength)) {
+            for _ in range(group.len(), (MAX_GROUP_NAME_LENGTH)) {
                 vec.push(0);
             }
         }
@@ -390,7 +390,7 @@ impl SpreadClient {
         //   num_groups: 4
         //   hint:       4
         //   data_len:   4
-        let header_vec = try!(self.stream.read_exact(MaxGroupNameLength + 16));
+        let header_vec = try!(self.stream.read_exact(MAX_GROUP_NAME_LENGTH + 16));
         let is_correct_endianness = same_endianness(bytes_to_int(header_vec.slice(0, 4)));
 
         let svc_type = match (is_correct_endianness, bytes_to_int(header_vec.slice(0, 4))) {
@@ -420,13 +420,13 @@ impl SpreadClient {
         // Groups format (sizes in bytes):
         //   groups: num_groups
         let groups_vec =
-            try!(self.stream.read_exact(MaxGroupNameLength * num_groups as uint));
+            try!(self.stream.read_exact(MAX_GROUP_NAME_LENGTH * num_groups as uint));
         let mut groups = Vec::new();
 
         for n in range(0, num_groups) {
-            let i: uint = n as uint * MaxGroupNameLength;
+            let i: uint = n as uint * MAX_GROUP_NAME_LENGTH;
             let group = try!(
-                ISO_8859_1.decode(groups_vec.slice(i, i + MaxGroupNameLength), DecoderTrap::Strict)
+                ISO_8859_1.decode(groups_vec.slice(i, i + MAX_GROUP_NAME_LENGTH), DecoderTrap::Strict)
                     .map_err(|error| IoError {
                         kind: OtherIoError,
                         desc: "Failed to decode group name",

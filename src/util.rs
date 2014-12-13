@@ -1,7 +1,7 @@
 use std::iter::range_step_inclusive;
 
 /// Used to determine endianness.
-static EndianType: u32 = 0x80000080;
+static ENDIANTYPE: u32 = 0x80000080;
 
 /// Convert an i32 to a 4-element byte vector.
 pub fn int_to_bytes(i: u32) -> Vec<u8> {
@@ -26,7 +26,7 @@ pub fn bytes_to_int(bytes: &[u8]) -> u32 {
 /// Returns true if the argument int has the same endianness
 /// as the local machine.
 pub fn same_endianness(i: u32) -> bool {
-    (i & EndianType) == 0
+    (i & ENDIANTYPE) == 0
 }
 
 /// Flips the endianness of the argument int.
