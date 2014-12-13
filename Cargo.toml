@@ -8,6 +8,6 @@ repository = "https://github.com/evnm/spread.rs"
 license = "MIT"
 readme = "README.md"
 
-[dependencies.encoding]
+[dependencies]
 
-git = "https://github.com/lifthrasiir/rust-encoding.git"
+encoding = "0.2.6"
