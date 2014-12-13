@@ -3,6 +3,10 @@
 name = "spread"
 version = "0.0.1"
 authors = ["Evan Meagher <evan.meagher@gmail.com>"]
+description = "A Rust client library for the Spread toolkit"
+repository = "https://github.com/evnm/spread.rs"
+license = "MIT"
+readme = "README.md"
 
 [dependencies.encoding]
 
