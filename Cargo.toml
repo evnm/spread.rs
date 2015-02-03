@@ -11,3 +11,4 @@ readme = "README.md"
 [dependencies]
 
 encoding = "0.2.6"
+log = "0.2.2"

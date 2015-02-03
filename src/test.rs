@@ -3,7 +3,6 @@ mod test {
     use {connect, encode_connect_message, SpreadClient};
     use encoding::{Encoding, EncoderTrap};
     use encoding::all::ISO_8859_1;
-    use std::io::net::ip::SocketAddr;
     use util::{int_to_bytes, bytes_to_int};
 
     #[test]
@@ -46,9 +45,7 @@ mod test {
 
     //#[test]
     fn should_connect_and_disconnect() {
-        let socket_addr =
-            from_str::<SocketAddr>("127.0.0.1:4803").expect("malformed address");
-        let result = connect(socket_addr, "test_user", false);
+        let result = connect("127.0.0.1:4803", "test_user", false);
         match result {
             Ok(mut client) => {
                 let msg = ISO_8859_1.encode("hello".as_slice(), EncoderTrap::Strict)
@@ -64,16 +61,14 @@ mod test {
 
     //#[test]
     fn should_receive() {
-        let socket_addr =
-            from_str::<SocketAddr>("127.0.0.1:4803").expect("malformed address");
-        let result = connect(socket_addr, "test_user", true);
+        let result = connect("127.0.0.1:4803", "test_user", true);
         match result {
             Ok(mut client) => {
                 assert!(client.join("foo".as_slice()).is_ok());
                 let msg = client.receive().ok().expect("receive failed");
                 println!("sender: {}", msg.sender);
-                println!("groups: {}", msg.groups);
-                println!("data: {}", msg.data);
+                println!("groups: {:?}", msg.groups);
+                println!("data: {:?}", msg.data);
                 assert!(client.disconnect().is_ok());
                 // fail the test so that stdout is printed.
                 assert!(false);

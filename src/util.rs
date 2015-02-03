@@ -6,7 +6,7 @@ static ENDIANTYPE: u32 = 0x80000080;
 /// Convert an i32 to a 4-element byte vector.
 pub fn int_to_bytes(i: u32) -> Vec<u8> {
     let mut vec: Vec<u8> = Vec::new();
-    for p in range_step_inclusive(0u, 24, 8) {
+    for p in range_step_inclusive(0u8, 24, 8) {
         vec.push(((i >> p) & 0xFF) as u8);
     }
     vec.reverse();
